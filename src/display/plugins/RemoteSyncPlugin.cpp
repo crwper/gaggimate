@@ -197,12 +197,18 @@ void RemoteSyncPlugin::taskTrampoline(void *arg) { static_cast<RemoteSyncPlugin 
 
 void RemoteSyncPlugin::taskLoop() {
     vTaskDelay(pdMS_TO_TICKS(STARTUP_DELAY_MS));
+    ESP_LOGI(LOG_TAG, "Task started");
     while (true) {
         const Settings &s = controller->getSettings();
-        const bool ready = s.isRemoteSyncEnabled() && !s.getRemoteSyncUrl().isEmpty() && !s.getRemoteSyncToken().isEmpty() &&
-                           WiFi.status() == WL_CONNECTED;
-        if (ready) {
+        const bool enabled = s.isRemoteSyncEnabled();
+        const bool urlSet = !s.getRemoteSyncUrl().isEmpty();
+        const bool tokenSet = !s.getRemoteSyncToken().isEmpty();
+        const bool wifiUp = WiFi.status() == WL_CONNECTED;
+        if (enabled && urlSet && tokenSet && wifiUp) {
             runSync();
+        } else {
+            ESP_LOGI(LOG_TAG, "Skipping sync (enabled=%d url_set=%d token_set=%d wifi=%d)",
+                     enabled, urlSet, tokenSet, wifiUp);
         }
         // Either the periodic timer fires or someone calls requestSync().
         ulTaskNotifyTake(pdTRUE, SYNC_INTERVAL_TICKS);
