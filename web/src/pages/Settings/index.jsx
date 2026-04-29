@@ -167,6 +167,9 @@ export function Settings() {
       if (key === 'homeAssistant') {
         value = !formData.homeAssistant;
       }
+      if (key === 'rsEnabled') {
+        value = !formData.rsEnabled;
+      }
       if (key === 'momentaryButtons') {
         value = !formData.momentaryButtons;
       }

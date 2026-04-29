@@ -86,6 +86,9 @@ class Settings {
     String getHomeAssistantPassword() const { return homeAssistantPassword; }
     int getHomeAssistantPort() const { return homeAssistantPort; }
     String getHomeAssistantTopic() const { return homeAssistantTopic; }
+    bool isRemoteSyncEnabled() const { return remoteSyncEnabled; }
+    String getRemoteSyncUrl() const { return remoteSyncUrl; }
+    String getRemoteSyncToken() const { return remoteSyncToken; }
     bool isMomentaryButtons() const { return momentaryButtons; }
     String getTimezone() const { return timezone; }
     bool isClock24hFormat() const { return clock24hFormat; }
@@ -149,6 +152,9 @@ class Settings {
     void setHomeAssistantIP(const String &homeAssistantIP);
     void setHomeAssistantPort(int homeAssistantPort);
     void setHomeAssistantTopic(const String &homeAssistantTopic);
+    void setRemoteSyncEnabled(bool enabled);
+    void setRemoteSyncUrl(const String &url);
+    void setRemoteSyncToken(const String &token);
     void setMomentaryButtons(bool momentary_buttons);
     void setTimezone(String timezone);
     void setClockFormat(bool format_24h);
@@ -219,6 +225,9 @@ class Settings {
     String homeAssistantIP = "";
     int homeAssistantPort = 1883;
     String homeAssistantTopic = DEFAULT_HOME_ASSISTANT_TOPIC;
+    bool remoteSyncEnabled = false;
+    String remoteSyncUrl = "";
+    String remoteSyncToken = "";
     bool momentaryButtons = false;
     String timezone = DEFAULT_TIMEZONE;
     bool clock24hFormat = true;

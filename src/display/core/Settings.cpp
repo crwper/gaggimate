@@ -38,6 +38,9 @@ Settings::Settings() {
     homeAssistantTopic = preferences.getString("ha_t", DEFAULT_HOME_ASSISTANT_TOPIC);
     homeAssistantUser = preferences.getString("ha_u", "");
     homeAssistantPassword = preferences.getString("ha_pw", "");
+    remoteSyncEnabled = preferences.getBool("rs_e", false);
+    remoteSyncUrl = preferences.getString("rs_u", "");
+    remoteSyncToken = preferences.getString("rs_t", "");
     standbyTimeout = preferences.getInt("sbt", DEFAULT_STANDBY_TIMEOUT_MS);
     timezone = preferences.getString("tz", DEFAULT_TIMEZONE);
     clock24hFormat = preferences.getBool("clk_24h", true);
@@ -284,6 +287,21 @@ void Settings::setHomeAssistantPassword(const String &homeAssistantPassword) {
     save();
 }
 
+void Settings::setRemoteSyncEnabled(const bool enabled) {
+    remoteSyncEnabled = enabled;
+    save();
+}
+
+void Settings::setRemoteSyncUrl(const String &url) {
+    remoteSyncUrl = url;
+    save();
+}
+
+void Settings::setRemoteSyncToken(const String &token) {
+    remoteSyncToken = token;
+    save();
+}
+
 void Settings::setMomentaryButtons(bool momentary_buttons) {
     momentaryButtons = momentary_buttons;
     save();
@@ -482,6 +500,9 @@ void Settings::doSave() {
     preferences.putString("ha_t", homeAssistantTopic);
     preferences.putString("ha_u", homeAssistantUser);
     preferences.putString("ha_pw", homeAssistantPassword);
+    preferences.putBool("rs_e", remoteSyncEnabled);
+    preferences.putString("rs_u", remoteSyncUrl);
+    preferences.putString("rs_t", remoteSyncToken);
     preferences.putString("tz", timezone);
     preferences.putBool("clk_24h", clock24hFormat);
     preferences.putString("sp", selectedProfile);
