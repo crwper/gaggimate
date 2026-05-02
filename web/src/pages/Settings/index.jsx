@@ -53,6 +53,31 @@ function splitButtons(buttonBehavior) {
   return { button0, button1, button2 };
 }
 
+/**
+ * Split a PID CSV string into the form's two-input shape.
+ *
+ * The firmware stores PID as a single CSV `Kp,Ki,Kd,Kff` string, but the
+ * form edits Kp/Ki/Kd as one input and Kff as another. This converts the
+ * on-wire shape into `{ pid, kf }` for the form. Used both on initial
+ * fetch and after every Save — without re-splitting on the post-save
+ * response, a fourth field leaks into the `pid` input and the next Save
+ * sends a 5-field CSV.
+ *
+ * @param {string|undefined} pidString - CSV `Kp,Ki,Kd,Kff` string from the
+ *   firmware, or empty/undefined if no PID has been saved yet.
+ * @returns {{ pid: string, kf: string }} - `pid` is the first three CSV
+ *   fields joined by commas; `kf` is the fourth field, or `'0.000'` if
+ *   absent.
+ */
+function splitPidString(pidString) {
+  if (!pidString) return { pid: pidString, kf: '0.000' };
+  const parts = pidString.split(',');
+  if (parts.length >= 4) {
+    return { pid: parts.slice(0, 3).join(','), kf: parts[3] };
+  }
+  return { pid: pidString, kf: '0.000' };
+}
+
 export function Settings() {
   const apiService = useContext(ApiServiceContext);
   const [profiles, setProfiles] = useState([]);
