@@ -12,15 +12,12 @@ namespace {
 
 constexpr TickType_t SYNC_INTERVAL_TICKS = pdMS_TO_TICKS(5 * 60 * 1000);
 constexpr unsigned long STARTUP_DELAY_MS = 15000;
-constexpr time_t FILE_QUIESCENCE_SECS = 10;
 constexpr int HTTP_TIMEOUT_MS = 10000;
 constexpr const char *SHOTS_DIR = "/h";
 
 struct ManifestEntry {
     String id;
     int64_t slogSize = 0;
-    bool hasNotes = false;
-    int64_t notesMtime = 0;
 };
 
 String trimTrailingSlash(const String &s) {
@@ -34,10 +31,11 @@ void addAuth(HTTPClient &http, const String &token) {
     http.addHeader("Authorization", String("Bearer ") + token);
 }
 
-// Walks /h/ and returns one entry per shot whose .slog and .json files have
-// both been quiescent (no writes) for FILE_QUIESCENCE_SECS. The quiescence
-// window protects against uploading a partial file while ShotHistoryPlugin's
-// extended-recording window is still open.
+// Walks /h/ and returns one entry per `<id>.slog` file. The plugin treats
+// shot data as upload-only and atomic: a file appearing in /h/ is considered
+// complete because `ShotHistoryPlugin` only renames/closes after the final
+// header patch. Server-side header validation is the authoritative atomicity
+// guard if a partial somehow gets uploaded; see the server's POST handler.
 std::vector<ManifestEntry> readLocalManifest(FS *fs) {
     std::vector<ManifestEntry> out;
     File dir = fs->open(SHOTS_DIR);
@@ -45,24 +43,6 @@ std::vector<ManifestEntry> readLocalManifest(FS *fs) {
         return out;
     }
 
-    struct Pair {
-        String id;
-        int64_t slogSize = -1; // -1 means no .slog seen yet
-        bool hasNotes = false;
-        int64_t notesMtime = 0;
-        bool quiescent = true;
-    };
-    std::vector<Pair> pairs;
-    auto findOrInsert = [&](const String &id) -> Pair & {
-        for (auto &p : pairs) {
-            if (p.id == id)
-                return p;
-        }
-        pairs.push_back({id, -1, false, 0, true});
-        return pairs.back();
-    };
-
-    const time_t now = ::time(nullptr);
     File f = dir.openNextFile();
     while (f) {
         String name = f.name();
@@ -70,34 +50,13 @@ std::vector<ManifestEntry> readLocalManifest(FS *fs) {
         if (slash >= 0)
             name = name.substring(slash + 1);
 
-        time_t mtime = f.getLastWrite();
-        bool fresh = (mtime > 0) && (now > mtime) && ((now - mtime) < FILE_QUIESCENCE_SECS);
-
         if (name.endsWith(".slog")) {
             String id = name.substring(0, name.length() - 5);
-            Pair &p = findOrInsert(id);
-            p.slogSize = f.size();
-            if (fresh)
-                p.quiescent = false;
-        } else if (name.endsWith(".json")) {
-            String id = name.substring(0, name.length() - 5);
-            Pair &p = findOrInsert(id);
-            p.hasNotes = true;
-            p.notesMtime = mtime > 0 ? static_cast<int64_t>(mtime) : 0;
-            if (fresh)
-                p.quiescent = false;
+            out.push_back({id, static_cast<int64_t>(f.size())});
         }
         f = dir.openNextFile();
     }
     dir.close();
-
-    for (auto &p : pairs) {
-        if (p.slogSize < 0)
-            continue; // orphan .json with no .slog
-        if (!p.quiescent)
-            continue;
-        out.push_back({p.id, p.slogSize, p.hasNotes, p.notesMtime});
-    }
     return out;
 }
 
@@ -125,8 +84,6 @@ bool fetchServerManifest(const String &baseUrl, const String &token, std::vector
         ManifestEntry e;
         e.id = obj["id"].as<String>();
         e.slogSize = obj["slog_size"].as<int64_t>();
-        e.hasNotes = obj["has_notes"].as<bool>();
-        e.notesMtime = obj["notes_mtime"].as<int64_t>();
         out.push_back(e);
     }
     return true;
@@ -150,18 +107,6 @@ bool postFile(const String &url, const String &token, const String &contentType,
     return code >= 200 && code < 300;
 }
 
-bool deleteShot(const String &baseUrl, const String &token, const String &id) {
-    HTTPClient http;
-    http.setTimeout(HTTP_TIMEOUT_MS);
-    if (!http.begin(baseUrl + "/api/shots/" + id))
-        return false;
-    addAuth(http, token);
-    int code = http.sendRequest("DELETE");
-    http.end();
-    // Treat 404 as success — the row's already gone, which is what we wanted.
-    return (code >= 200 && code < 300) || code == HTTP_CODE_NOT_FOUND;
-}
-
 const ManifestEntry *findById(const std::vector<ManifestEntry> &v, const String &id) {
     for (auto &e : v)
         if (e.id == id)
@@ -182,7 +127,10 @@ void RemoteSyncPlugin::setup(Controller *c, PluginManager *pm) {
             requestSync();
         }
     });
-    pluginManager->on("controller:brew:end", [this](Event const &) { requestSync(); });
+    // Fires after the .slog file is closed and the index entry is written
+    // (ShotHistoryPlugin::record). At that point the file is final and safe
+    // to upload.
+    pluginManager->on("history:shot:save", [this](Event const &) { requestSync(); });
 
     xTaskCreatePinnedToCore(taskTrampoline, "RemoteSync", configMINIMAL_STACK_SIZE * 8, this, 1, &taskHandle, 0);
 }
@@ -228,46 +176,26 @@ bool RemoteSyncPlugin::runSync() {
     std::vector<ManifestEntry> local = readLocalManifest(fs);
 
     int uploaded = 0;
-    int deleted = 0;
 
-    // Local → server: upload missing or out-of-date entries.
+    // Local → server: upload any shot the server doesn't already have, or
+    // whose recorded size differs from local. Server-only entries are left
+    // alone — the server is a downstream consumer with its own retention,
+    // so we never delete from absence.
     for (auto &le : local) {
         const ManifestEntry *se = findById(server, le.id);
         const bool needSlog = !se || se->slogSize != le.slogSize;
-        const bool needNotes = le.hasNotes && (!se || !se->hasNotes || se->notesMtime != le.notesMtime);
+        if (!needSlog) continue;
 
-        if (needSlog) {
-            const String url = baseUrl + "/api/shots/" + le.id;
-            const String path = String(SHOTS_DIR) + "/" + le.id + ".slog";
-            if (postFile(url, token, "application/octet-stream", fs, path)) {
-                ESP_LOGI(LOG_TAG, "Uploaded slog %s (%lld bytes)", le.id.c_str(), (long long)le.slogSize);
-                uploaded++;
-            } else {
-                ESP_LOGW(LOG_TAG, "Failed to upload slog %s", le.id.c_str());
-            }
-        }
-        if (needNotes) {
-            const String url = baseUrl + "/api/shots/" + le.id + "/notes";
-            const String path = String(SHOTS_DIR) + "/" + le.id + ".json";
-            if (postFile(url, token, "application/json", fs, path)) {
-                ESP_LOGI(LOG_TAG, "Uploaded notes %s", le.id.c_str());
-                uploaded++;
-            } else {
-                ESP_LOGW(LOG_TAG, "Failed to upload notes %s", le.id.c_str());
-            }
+        const String url = baseUrl + "/api/shots/" + le.id;
+        const String path = String(SHOTS_DIR) + "/" + le.id + ".slog";
+        if (postFile(url, token, "application/octet-stream", fs, path)) {
+            ESP_LOGI(LOG_TAG, "Uploaded slog %s (%lld bytes)", le.id.c_str(), (long long)le.slogSize);
+            uploaded++;
+        } else {
+            ESP_LOGW(LOG_TAG, "Failed to upload slog %s", le.id.c_str());
         }
     }
 
-    // Server → device: anything on the server but not local → soft-delete.
-    for (auto &se : server) {
-        if (findById(local, se.id) == nullptr) {
-            if (deleteShot(baseUrl, token, se.id)) {
-                ESP_LOGI(LOG_TAG, "Soft-deleted ghost %s", se.id.c_str());
-                deleted++;
-            }
-        }
-    }
-
-    ESP_LOGI(LOG_TAG, "Sync round done: uploaded=%d deleted=%d", uploaded, deleted);
+    ESP_LOGI(LOG_TAG, "Sync round done: uploaded=%d", uploaded);
     return true;
 }

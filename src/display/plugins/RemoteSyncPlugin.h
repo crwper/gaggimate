@@ -23,7 +23,9 @@ class RemoteSyncPlugin : public Plugin {
     void taskLoop();
     static void taskTrampoline(void *arg);
 
-    // One reconciliation pass: fetch server manifest, diff, POST/DELETE deltas.
+    // One reconciliation pass: fetch server manifest, diff, POST any shots
+    // the server doesn't already have. Upload-only — server-side retention
+    // is the server's concern, so we never delete from absence.
     // Returns false if anything fails — caller logs and we'll try again next tick.
     bool runSync();
 
