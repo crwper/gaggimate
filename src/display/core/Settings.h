@@ -10,6 +10,26 @@
 
 #define PREFERENCES_KEY "controller"
 
+// Boiler PID gains (parsed from `getPid()`'s comma-separated form). Returned
+// as all-zeros if the underlying string is malformed (truncated, missing
+// fields, non-numeric tokens) — analysis-side detection: "all zeros means
+// the controller config block in the slog is unreliable for this shot."
+struct PidGains {
+    float kp;
+    float ki;
+    float kd;
+    float kff;
+};
+
+// Pump flow-model polynomial coefficients (parsed from `getPumpModelCoeffs()`).
+// Same all-zeros-on-parse-failure semantics as PidGains.
+struct PumpFlowCoeffs {
+    float a;
+    float b;
+    float c;
+    float d;
+};
+
 struct AutoWakeupSchedule {
     String time;    // HH:MM format
     bool days[7]{}; // [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
@@ -67,6 +87,14 @@ class Settings {
     bool isDelayAdjust() const { return delayAdjust; }
     String getPid() const { return pid; }
     String getPumpModelCoeffs() const { return pumpModelCoeffs; }
+    // Parsed views of the comma-separated string fields above. Used by `.slog`
+    // v6+ recording to populate the per-shot controller-config block, and
+    // available for any other caller that wants typed access. Both return
+    // all-zeros if the underlying string is malformed; partial parses
+    // (some-but-not-all fields valid) also return all-zeros to avoid
+    // mixing valid and default values.
+    PidGains getPidGains() const;
+    PumpFlowCoeffs getPumpFlowCoeffs() const;
     String getWifiSsid() const { return wifiSsid; }
     String getWifiPassword() const { return wifiPassword; }
     String getMdnsName() const { return mdnsName; }

@@ -46,8 +46,13 @@ using button_callback_t = std::function<void(uint8_t index, bool val)>;
 using simple_output_callback_t = std::function<void(bool valve, float pumpSetpoint, float boilerSetpoint)>;
 using advanced_output_callback_t =
     std::function<void(bool valve, float boilerSetpoint, bool pressureTarget, float pumpPressure, float pumpFlow)>;
+// Sensor-data callback. The trailing two fields (heaterOutput, pumpOutput) are
+// added in Controller firmware advertising the `extendedSensor` capability;
+// older Controllers that don't emit them leave the values at 0 (the parser
+// sscans whatever is present and zero-initializes the unparsed slots).
 using sensor_read_callback_t =
-    std::function<void(float temperature, float pressure, float puckFlow, float pumpFlow, float puckResistance)>;
+    std::function<void(float temperature, float pressure, float puckFlow, float pumpFlow, float puckResistance,
+                       float heaterOutput, float pumpOutput)>;
 using led_control_callback_t = std::function<void(uint8_t channel, uint8_t brightness)>;
 
 struct SystemCapabilities {
@@ -55,6 +60,10 @@ struct SystemCapabilities {
     bool pressure;
     bool ledControl;
     bool tof;
+    // Controller advertises that `sendSensorData` emits two extra fields
+    // (heaterOutput, pumpOutput) for `.slog` v6+ recording. False on older
+    // Controller firmware; the parser still works against five-field payloads.
+    bool extendedSensor;
 };
 
 struct SystemInfo {

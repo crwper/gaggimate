@@ -530,6 +530,62 @@ void Settings::doSave() {
     preferences.end();
 }
 
+namespace {
+// Parse a fixed count of comma-separated floats from `s`. Returns true iff
+// exactly `count` non-empty tokens parsed cleanly via strtof (no trailing
+// garbage in any token). Caller passes a pre-zeroed output buffer; on
+// failure we leave it untouched so callers can rely on all-zeros.
+bool parseFloatCsv(const String &s, float *out, size_t count) {
+    if (s.length() == 0)
+        return false;
+    size_t produced = 0;
+    int start = 0;
+    while (produced < count) {
+        int end = s.indexOf(',', start);
+        const int tokenEnd = (end < 0) ? s.length() : end;
+        if (tokenEnd <= start)
+            return false; // empty token between commas, or trailing comma
+        const String token = s.substring(start, tokenEnd);
+        char *parseEnd = nullptr;
+        const float value = strtof(token.c_str(), &parseEnd);
+        if (parseEnd == nullptr || *parseEnd != '\0')
+            return false; // trailing non-numeric content
+        out[produced++] = value;
+        if (end < 0) {
+            // No more separators; need produced == count and no leftovers.
+            return produced == count;
+        }
+        start = end + 1;
+    }
+    // Reject extra trailing data (e.g. five fields when four expected).
+    return start > static_cast<int>(s.length());
+}
+} // namespace
+
+PidGains Settings::getPidGains() const {
+    PidGains result{};
+    float values[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    if (parseFloatCsv(pid, values, 4)) {
+        result.kp = values[0];
+        result.ki = values[1];
+        result.kd = values[2];
+        result.kff = values[3];
+    }
+    return result;
+}
+
+PumpFlowCoeffs Settings::getPumpFlowCoeffs() const {
+    PumpFlowCoeffs result{};
+    float values[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    if (parseFloatCsv(pumpModelCoeffs, values, 4)) {
+        result.a = values[0];
+        result.b = values[1];
+        result.c = values[2];
+        result.d = values[3];
+    }
+    return result;
+}
+
 [[noreturn]] void Settings::loopTask(void *arg) {
     auto *settings = static_cast<Settings *>(arg);
     while (true) {

@@ -4,7 +4,7 @@
 // Dynamic field parsing based on fieldsMask for future extensibility
 
 const HEADER_SIZE_V4 = 128;
-const HEADER_SIZE_V5 = 512;
+const HEADER_SIZE_V5 = 512; // v5 and v6 share the 512-byte header (v6 fills reserved_v5 with controllerConfig + firmwareVersion)
 const MAGIC = 0x544f4853; // 'SHOT' - matches backend SHOT_LOG_MAGIC
 
 const TEMP_SCALE = 10;
@@ -12,6 +12,11 @@ const PRESSURE_SCALE = 10;
 const FLOW_SCALE = 100;
 const WEIGHT_SCALE = 10;
 const RESISTANCE_SCALE = 100;
+// `ho` (heater output) and `po` (pump output) both encode percent duty in
+// hundredths-of-a-percent (firmware ×10 for ho's 0..1000 native range, ×100
+// for po's 0..100 native range — both produce a 0..10000 stored range).
+// Decoder rule: percent = stored / 100.0.
+const DUTY_PERCENT_SCALE = 100;
 
 // Field bit positions (must match shot_log_format.h)
 const FIELD_BITS = {
@@ -29,6 +34,8 @@ const FIELD_BITS = {
   PR: 11, // puck resistance
   SI: 12, // system info (v2+)
   // Phase number moved to header transitions in v5+
+  HO: 13, // heater output (v6+)
+  PO: 14, // pump output (v6+)
 };
 
 // Field definitions with parsing info
@@ -64,6 +71,8 @@ const FIELD_DEFS = {
     }),
   },
   // Phase number field removed in v5+, moved to header transitions
+  [FIELD_BITS.HO]: { name: 'ho', type: 'uint16', scale: DUTY_PERCENT_SCALE },
+  [FIELD_BITS.PO]: { name: 'po', type: 'uint16', scale: DUTY_PERCENT_SCALE },
 };
 
 function decodeCString(bytes) {
@@ -160,6 +169,34 @@ export function parseBinaryShot(arrayBuffer, id) {
   if (version >= 5) {
     const transitionCount = view.getUint8(110 + 12 * 29); // After 12 PhaseTransitions
     phaseTransitions = parsePhaseTransitions(view, transitionCount);
+  }
+
+  // Parse v6+ controller-config and firmware-version blocks. These live in
+  // what was reserved_v5 in earlier formats, starting immediately after
+  // phaseTransitionCount (offset 459). Each ShotLogControllerConfig is 36 B
+  // (9 floats), followed by ShotLogFirmwareVersion (4 bytes).
+  let controllerConfig = null;
+  let firmwareVersion = null;
+  if (version >= 6) {
+    const cfgOffset = 459;
+    controllerConfig = {
+      heaterKp: view.getFloat32(cfgOffset, true),
+      heaterKi: view.getFloat32(cfgOffset + 4, true),
+      heaterKd: view.getFloat32(cfgOffset + 8, true),
+      heaterKff: view.getFloat32(cfgOffset + 12, true),
+      pumpCoeffA: view.getFloat32(cfgOffset + 16, true),
+      pumpCoeffB: view.getFloat32(cfgOffset + 20, true),
+      pumpCoeffC: view.getFloat32(cfgOffset + 24, true),
+      pumpCoeffD: view.getFloat32(cfgOffset + 28, true),
+      idleHeaterOutput: view.getFloat32(cfgOffset + 32, true),
+    };
+    const fwOffset = cfgOffset + 36;
+    firmwareVersion = {
+      major: view.getUint8(fwOffset),
+      minor: view.getUint8(fwOffset + 1),
+      patch: view.getUint8(fwOffset + 2),
+      commitsAhead: view.getUint8(fwOffset + 3),
+    };
   }
 
   // Calculate expected sample size from fieldsMask
@@ -283,5 +320,7 @@ export function parseBinaryShot(arrayBuffer, id) {
     trailingBytes,
     samplesExpected: sampleCountHeader,
     phaseTransitions, // v5+ phase transition data
+    controllerConfig, // v6+ PID gains, pump coeffs, idle heater output (null for older files)
+    firmwareVersion, // v6+ {major, minor, patch, commitsAhead} (null for older files)
   };
 }

@@ -143,11 +143,16 @@ void Controller::setupBluetooth() {
         }
     });
     clientController.registerSensorCallback(
-        [this](const float temp, const float pressure, const float puckFlow, const float pumpFlow, const float puckResistance) {
+        [this](const float temp, const float pressure, const float puckFlow, const float pumpFlow, const float puckResistance,
+               const float heaterOutput, const float pumpOutput) {
             onTempRead(temp);
             this->pressure = pressure;
             this->currentPuckFlow = puckFlow;
             this->currentPumpFlow = pumpFlow;
+            // Cached for `.slog` v6+ recording. Zero when the Controller doesn't
+            // advertise `extendedSensor` (parser leaves them at the sscanf default).
+            this->currentHeaterOutput = heaterOutput;
+            this->currentPumpOutput = pumpOutput;
             pluginManager->trigger("boiler:pressure:change", "value", pressure);
             pluginManager->trigger("pump:puck-flow:change", "value", puckFlow);
             pluginManager->trigger("pump:flow:change", "value", pumpFlow);
@@ -217,6 +222,10 @@ void Controller::setupInfos() {
                                     .pressure = doc["cp"]["ps"].as<bool>(),
                                     .ledControl = doc["cp"]["led"].as<bool>(),
                                     .tof = doc["cp"]["tof"].as<bool>(),
+                                    // `xs` (extended sensor) advertised by Controller firmware that
+                                    // emits heaterOutput/pumpOutput in sendSensorData. Defaults to
+                                    // false (ArduinoJson missing-key behavior) on older firmware.
+                                    .extendedSensor = doc["cp"]["xs"].as<bool>(),
                                 }};
     }
 }

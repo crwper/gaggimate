@@ -12,6 +12,7 @@ class SimplePump : public Pump {
     void setup() override;
     void loop() override;
     void setPower(float setpoint) override;
+    float getOutput() const override { return _setpoint; }
 
   private:
     int _pin;

@@ -231,15 +231,17 @@ void GaggiMateController::thermalRunawayShutdown() {
 }
 
 void GaggiMateController::sendSensorData() {
+    const float heaterOutput = (heater != nullptr) ? heater->getOutput() : 0.0f;
+    const float pumpOutput = (pump != nullptr) ? pump->getOutput() : 0.0f;
     if (_config.capabilites.pressure) {
         auto dimmedPump = static_cast<DimmedPump *>(pump);
         _ble.sendSensorData(this->thermocouple->read(), this->pressureSensor->getPressure(), dimmedPump->getPuckFlow(),
-                            dimmedPump->getPumpFlow(), dimmedPump->getPuckResistance());
+                            dimmedPump->getPumpFlow(), dimmedPump->getPuckResistance(), heaterOutput, pumpOutput);
         if (this->valve->getState()) {
             _ble.sendVolumetricMeasurement(dimmedPump->getCoffeeVolume());
         }
     } else {
-        _ble.sendSensorData(this->thermocouple->read(), 0.0f, 0.0f, 0.0f, 0.0f);
+        _ble.sendSensorData(this->thermocouple->read(), 0.0f, 0.0f, 0.0f, 0.0f, heaterOutput, pumpOutput);
     }
 }
 

@@ -16,6 +16,12 @@ class DimmedPump : public Pump {
     void setup() override;
     void loop() override;
     void setPower(float setpoint) override;
+    // Current commanded duty (0..100). `_power` is the value actually pushed
+    // to PSM in all control modes — `setPower` writes it directly in POWER mode,
+    // and `updatePower` copies `_controllerPower` (the closed-loop output) into
+    // it in PRESSURE/FLOW modes before pushing to PSM. So `_power` is always
+    // the live commanded duty regardless of mode.
+    float getOutput() const override { return _power; }
 
     float getCoffeeVolume();
     float getPumpFlow();

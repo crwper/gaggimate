@@ -51,6 +51,11 @@ class Controller {
     virtual float getCurrentPressure() const { return pressure; }
     virtual float getCurrentPuckFlow() const { return currentPuckFlow; }
     virtual float getCurrentPumpFlow() const { return currentPumpFlow; }
+    // Latest values from the Controller's extended sensor message. 0 if the
+    // Controller doesn't advertise the `extendedSensor` capability (older
+    // firmware) — analysis-side detection is "all-zeros throughout shot."
+    virtual float getCurrentHeaterOutput() const { return currentHeaterOutput; }
+    virtual float getCurrentPumpOutput() const { return currentPumpOutput; }
 
     bool isTaskHealthy() const { return is_task_healthy(eTaskGetState(taskHandle)); }
 
@@ -143,6 +148,8 @@ class Controller {
     float targetPressure = 0.0f;
     float currentPuckFlow = 0.0f;
     float currentPumpFlow = 0.0f;
+    float currentHeaterOutput = 0.0f;
+    float currentPumpOutput = 0.0f;
     float targetFlow = 0.0f;
     int tofDistance = 0;
 
