@@ -599,9 +599,13 @@ void Controller::activate() {
 #else
         currentVolumetricSource = VolumetricMeasurementSource::BLUETOOTH;
 #endif
-        if (mode == MODE_BREW) {
-            pluginManager->trigger("controller:brew:prestart");
-        }
+    }
+    // `controller:brew:prestart` fires unconditionally for brew mode so plugins
+    // (e.g. ShotHistoryPlugin's idle-heater snapshot) get a reliable
+    // pre-pump-engagement hook regardless of whether a BT scale is connected.
+    // BLEScalePlugin's handler is null-safe in the no-scale case.
+    if (mode == MODE_BREW) {
+        pluginManager->trigger("controller:brew:prestart");
     }
     delay(200);
     switch (mode) {

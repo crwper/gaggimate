@@ -21,8 +21,11 @@ struct PidGains {
     float kff;
 };
 
-// Pump flow-model polynomial coefficients (parsed from `getPumpModelCoeffs()`).
-// Same all-zeros-on-parse-failure semantics as PidGains.
+// Pump flow-model coefficients (parsed from `getPumpModelCoeffs()`). Two forms:
+//   - 2-field input "a,b" → simple oneBarFlow/nineBarFlow model; c/d are NaN.
+//   - 4-field input "a,b,c,d" → polynomial; all four are real values.
+// All-zeros result means parse failure (malformed input string). Distinguish
+// "simple model" from "polynomial" by checking `isnan(c) && isnan(d)`.
 struct PumpFlowCoeffs {
     float a;
     float b;

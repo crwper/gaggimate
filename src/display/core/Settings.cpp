@@ -1,6 +1,7 @@
 #include "Settings.h"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 Settings::Settings() {
@@ -575,6 +576,14 @@ PidGains Settings::getPidGains() const {
 }
 
 PumpFlowCoeffs Settings::getPumpFlowCoeffs() const {
+    // The pumpModelCoeffs string accepts two distinct forms, mirroring the BLE
+    // wire convention in NimBLEServerController:
+    //   - "a,b"        → simple model (oneBarFlow, nineBarFlow); c/d unused
+    //   - "a,b,c,d"    → polynomial model (a, b, c, d are coefficients)
+    // Try the 4-field form first; if that fails, fall back to 2-field with
+    // NaN sentinels for c/d so analysis tools can distinguish "simple model"
+    // (a, b set + c, d = NaN) from "polynomial model" (all four set) and
+    // from "malformed" (all zeros).
     PumpFlowCoeffs result{};
     float values[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     if (parseFloatCsv(pumpModelCoeffs, values, 4)) {
@@ -582,6 +591,14 @@ PumpFlowCoeffs Settings::getPumpFlowCoeffs() const {
         result.b = values[1];
         result.c = values[2];
         result.d = values[3];
+    } else {
+        float pair[2] = {0.0f, 0.0f};
+        if (parseFloatCsv(pumpModelCoeffs, pair, 2)) {
+            result.a = pair[0];
+            result.b = pair[1];
+            result.c = NAN;
+            result.d = NAN;
+        }
     }
     return result;
 }
