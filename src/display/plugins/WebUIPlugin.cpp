@@ -523,6 +523,11 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
                 settings->setHomeAssistantPort(request->arg("haPort").toInt());
             if (request->hasArg("haTopic"))
                 settings->setHomeAssistantTopic(request->arg("haTopic"));
+            settings->setRemoteSyncEnabled(request->hasArg("rsEnabled"));
+            if (request->hasArg("rsUrl"))
+                settings->setRemoteSyncUrl(request->arg("rsUrl"));
+            if (request->hasArg("rsToken"))
+                settings->setRemoteSyncToken(request->arg("rsToken"));
             settings->setMomentaryButtons(request->hasArg("momentaryButtons"));
             settings->setDelayAdjust(request->hasArg("delayAdjust"));
             if (request->hasArg("brewDelay"))
@@ -628,6 +633,9 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
     doc["haIP"] = settings.getHomeAssistantIP();
     doc["haPort"] = settings.getHomeAssistantPort();
     doc["haTopic"] = settings.getHomeAssistantTopic();
+    doc["rsEnabled"] = settings.isRemoteSyncEnabled();
+    doc["rsUrl"] = settings.getRemoteSyncUrl();
+    doc["rsToken"] = settings.getRemoteSyncToken();
     doc["pid"] = settings.getPid();
     doc["pumpModelCoeffs"] = settings.getPumpModelCoeffs();
     doc["wifiSsid"] = settings.getWifiSsid();

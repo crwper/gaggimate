@@ -255,6 +255,66 @@ export function PluginCard({
 
       <div className='bg-base-200 rounded-lg p-4'>
         <div className='flex items-center justify-between'>
+          <span className='text-xl font-medium'>Remote Sync</span>
+          <input
+            id='rsEnabled'
+            name='rsEnabled'
+            value='rsEnabled'
+            type='checkbox'
+            className='toggle toggle-primary'
+            checked={!!formData.rsEnabled}
+            onChange={onChange('rsEnabled')}
+            aria-label='Enable Remote Sync'
+          />
+        </div>
+        {formData.rsEnabled && (
+          <div className='border-base-300 mt-4 space-y-4 border-t pt-4'>
+            <p className='text-sm opacity-70'>
+              Mirror your shot history to a self-hosted{' '}
+              <a
+                href='https://github.com/jniebuhr/gaggimate-shot-archive'
+                target='_blank'
+                rel='noreferrer'
+              >
+                gaggimate-shot-archive
+              </a>{' '}
+              server so you can browse shots when the GaggiMate is offline. Sync runs after each
+              brew, on every Wi-Fi reconnect, and every 5 minutes as a catch-up.
+            </p>
+            <div className='form-control'>
+              <label htmlFor='rsUrl' className='mb-2 block text-sm font-medium'>
+                Server URL
+              </label>
+              <input
+                id='rsUrl'
+                name='rsUrl'
+                type='text'
+                className='input input-bordered w-full'
+                placeholder='http://server.local:8080'
+                value={formData.rsUrl}
+                onChange={onChange('rsUrl')}
+              />
+            </div>
+            <div className='form-control'>
+              <label htmlFor='rsToken' className='mb-2 block text-sm font-medium'>
+                Auth Token
+              </label>
+              <input
+                id='rsToken'
+                name='rsToken'
+                type='password'
+                className='input input-bordered w-full'
+                placeholder='shared bearer token'
+                value={formData.rsToken}
+                onChange={onChange('rsToken')}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className='bg-base-200 rounded-lg p-4'>
+        <div className='flex items-center justify-between'>
           <span className='text-xl font-medium'>Home Assistant over MQTT (Deprecated)</span>
           <input
             id='homeAssistant'
