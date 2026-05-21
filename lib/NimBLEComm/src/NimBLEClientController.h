@@ -3,6 +3,8 @@
 
 #include "NimBLEComm.h"
 #include "cstring"
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
 
 class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLEClientCallbacks {
   public:
@@ -10,6 +12,7 @@ class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLECli
     void initClient();
     bool connectToServer();
     void loop();
+    void dispatchPendingEvents();
 
     void sendAdvancedOutputControl(bool valve, float boilerSetpoint, bool pressureTarget, float pressure, float flow);
 
@@ -63,6 +66,27 @@ class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLECli
     bool readyForConnection = false;
     xTaskHandle taskHandle;
 
+    static constexpr size_t PENDING_EVENT_PAYLOAD_SIZE = 129;
+    static constexpr size_t PENDING_EVENT_QUEUE_LENGTH = 32;
+
+    enum class PendingEventType : uint8_t {
+        RemoteError,
+        Button,
+        SensorData,
+        AutotuneResult,
+        VolumetricMeasurement,
+        TofMeasurement,
+        Disconnect,
+        Unknown,
+    };
+
+    struct PendingEvent {
+        PendingEventType type = PendingEventType::Unknown;
+        char payload[PENDING_EVENT_PAYLOAD_SIZE]{};
+    };
+
+    QueueHandle_t pendingEventQueue = nullptr;
+
     remote_err_callback_t remoteErrorCallback = nullptr;
     button_callback_t btnCallback = nullptr;
     pid_control_callback_t autotuneResultCallback = nullptr;
@@ -84,7 +108,10 @@ class NimBLEClientController : public NimBLEAdvertisedDeviceCallbacks, NimBLECli
     void onDisconnect(NimBLEClient *pServer) override;
 
     // Notification callback
-    void notifyCallback(NimBLERemoteCharacteristic *pRemoteCharacteristic, uint8_t *pData, size_t length, bool isNotify) const;
+    void notifyCallback(NimBLERemoteCharacteristic *pRemoteCharacteristic, uint8_t *pData, size_t length, bool isNotify);
+    PendingEventType getPendingEventType(NimBLERemoteCharacteristic *pRemoteCharacteristic) const;
+    bool enqueuePendingEvent(PendingEventType type, const uint8_t *data = nullptr, size_t length = 0);
+    void dispatchPendingEvent(const PendingEvent &event);
 
     const char *LOG_TAG = "NimBLEClientController";
     static void loopTask(void *arg);

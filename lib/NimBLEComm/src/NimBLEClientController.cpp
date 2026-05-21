@@ -15,6 +15,13 @@ void NimBLEClientController::initClient() {
         ESP_LOGE(LOG_TAG, "Failed to create BLE client");
         return;
     }
+    if (pendingEventQueue == nullptr) {
+        pendingEventQueue = xQueueCreate(PENDING_EVENT_QUEUE_LENGTH, sizeof(PendingEvent));
+        if (pendingEventQueue == nullptr) {
+            ESP_LOGE(LOG_TAG, "Failed to create BLE event queue");
+            return;
+        }
+    }
     client->setClientCallbacks(this);
 
     // Scan for BLE Server
@@ -161,6 +168,17 @@ void NimBLEClientController::loop() {
     }
 }
 
+void NimBLEClientController::dispatchPendingEvents() {
+    if (pendingEventQueue == nullptr) {
+        return;
+    }
+
+    PendingEvent event;
+    while (xQueueReceive(pendingEventQueue, &event, 0) == pdTRUE) {
+        dispatchPendingEvent(event);
+    }
+}
+
 void NimBLEClientController::sendAdvancedOutputControl(bool valve, float boilerSetpoint, bool pressureTarget, float pressure,
                                                        float flow) {
     if (client->isConnected() && outputControlChar != nullptr) {
@@ -265,28 +283,85 @@ void NimBLEClientController::onDisconnect(NimBLEClient *pServer) {
     volumetricTareChar = nullptr;
     ledControlChar = nullptr;
     tofMeasurementChar = nullptr;
-    if (disconnectCallback != nullptr) {
-        disconnectCallback();
-    }
-    scan();
+    enqueuePendingEvent(PendingEventType::Disconnect);
 }
 
 // Notification callback
 void NimBLEClientController::notifyCallback(NimBLERemoteCharacteristic *pRemoteCharacteristic, uint8_t *pData, size_t length,
-                                            bool) const {
-    char rawData[129];
-    size_t copyLength = length < (sizeof(rawData) - 1) ? length : (sizeof(rawData) - 1);
-    memcpy(rawData, pData, copyLength);
-    rawData[copyLength] = '\0';
+                                            bool) {
+    enqueuePendingEvent(getPendingEventType(pRemoteCharacteristic), pData, length);
+}
 
-    if (pRemoteCharacteristic->getUUID().equals(NimBLEUUID(ERROR_CHAR_UUID))) {
+NimBLEClientController::PendingEventType
+NimBLEClientController::getPendingEventType(NimBLERemoteCharacteristic *pRemoteCharacteristic) const {
+    if (pRemoteCharacteristic == nullptr) {
+        return PendingEventType::Unknown;
+    }
+
+    const NimBLEUUID uuid = pRemoteCharacteristic->getUUID();
+    if (uuid.equals(NimBLEUUID(ERROR_CHAR_UUID))) {
+        return PendingEventType::RemoteError;
+    }
+    if (uuid.equals(NimBLEUUID(BTN_UUID))) {
+        return PendingEventType::Button;
+    }
+    if (uuid.equals(NimBLEUUID(SENSOR_DATA_UUID))) {
+        return PendingEventType::SensorData;
+    }
+    if (uuid.equals(NimBLEUUID(AUTOTUNE_RESULT_UUID))) {
+        return PendingEventType::AutotuneResult;
+    }
+    if (uuid.equals(NimBLEUUID(VOLUMETRIC_MEASUREMENT_UUID))) {
+        return PendingEventType::VolumetricMeasurement;
+    }
+    if (uuid.equals(NimBLEUUID(TOF_MEASUREMENT_UUID))) {
+        return PendingEventType::TofMeasurement;
+    }
+    return PendingEventType::Unknown;
+}
+
+bool NimBLEClientController::enqueuePendingEvent(PendingEventType type, const uint8_t *data, size_t length) {
+    if (pendingEventQueue == nullptr || type == PendingEventType::Unknown) {
+        return false;
+    }
+
+    PendingEvent event;
+    event.type = type;
+    if (data != nullptr && length > 0) {
+        const size_t copyLength =
+            length < (PENDING_EVENT_PAYLOAD_SIZE - 1) ? length : (PENDING_EVENT_PAYLOAD_SIZE - 1);
+        memcpy(event.payload, data, copyLength);
+        event.payload[copyLength] = '\0';
+    }
+
+    if (xQueueSend(pendingEventQueue, &event, 0) == pdTRUE) {
+        return true;
+    }
+
+    PendingEvent discarded;
+    xQueueReceive(pendingEventQueue, &discarded, 0);
+    if (xQueueSend(pendingEventQueue, &event, 0) == pdTRUE) {
+        ESP_LOGW(LOG_TAG, "BLE event queue full, discarded oldest event");
+        return true;
+    }
+
+    ESP_LOGE(LOG_TAG, "BLE event queue full, dropping event");
+    return false;
+}
+
+void NimBLEClientController::dispatchPendingEvent(const PendingEvent &event) {
+    const char *rawData = event.payload;
+
+    switch (event.type) {
+    case PendingEventType::RemoteError: {
         int errorCode = atoi(rawData);
         ESP_LOGV(LOG_TAG, "Error read: %d", errorCode);
         if (remoteErrorCallback != nullptr) {
             remoteErrorCallback(errorCode);
         }
+        break;
     }
-    if (pRemoteCharacteristic->getUUID().equals(NimBLEUUID(BTN_UUID))) {
+    case PendingEventType::Button: {
         int index = 0;
         int status = 0;
 
@@ -298,8 +373,9 @@ void NimBLEClientController::notifyCallback(NimBLERemoteCharacteristic *pRemoteC
         if (btnCallback != nullptr) {
             btnCallback(index, status);
         }
+        break;
     }
-    if (pRemoteCharacteristic->getUUID().equals(NimBLEUUID(SENSOR_DATA_UUID))) {
+    case PendingEventType::SensorData: {
         // v6 Controller firmware appends two extra fields (heaterOutput, pumpOutput).
         // Older firmware emits five; sscanf returns however many parsed, leaving the
         // rest at their initial 0.
@@ -325,8 +401,9 @@ void NimBLEClientController::notifyCallback(NimBLERemoteCharacteristic *pRemoteC
         if (sensorCallback != nullptr) {
             sensorCallback(temperature, pressure, puckFlow, pumpFlow, puckResistance, heaterOutput, pumpOutput);
         }
+        break;
     }
-    if (pRemoteCharacteristic->getUUID().equals(NimBLEUUID(AUTOTUNE_RESULT_UUID))) {
+    case PendingEventType::AutotuneResult: {
         ESP_LOGV(LOG_TAG, "autotune result: %s", rawData);
         if (autotuneResultCallback != nullptr) {
             float Kp = 0.0f;
@@ -341,20 +418,32 @@ void NimBLEClientController::notifyCallback(NimBLERemoteCharacteristic *pRemoteC
 
             autotuneResultCallback(Kp, Ki, Kd, Kf);
         }
+        break;
     }
-    if (pRemoteCharacteristic->getUUID().equals(NimBLEUUID(VOLUMETRIC_MEASUREMENT_UUID))) {
+    case PendingEventType::VolumetricMeasurement: {
         float value = atof(rawData);
         ESP_LOGV(LOG_TAG, "Volumetric measurement: %.2f", value);
         if (volumetricMeasurementCallback != nullptr) {
             volumetricMeasurementCallback(value);
         }
+        break;
     }
-    if (pRemoteCharacteristic->getUUID().equals(NimBLEUUID(TOF_MEASUREMENT_UUID))) {
+    case PendingEventType::TofMeasurement: {
         int value = atoi(rawData);
         ESP_LOGV(LOG_TAG, "ToF measurement: %d", value);
         if (tofMeasurementCallback != nullptr) {
             tofMeasurementCallback(value);
         }
+        break;
+    }
+    case PendingEventType::Disconnect:
+        if (disconnectCallback != nullptr) {
+            disconnectCallback();
+        }
+        scan();
+        break;
+    case PendingEventType::Unknown:
+        break;
     }
 }
 
