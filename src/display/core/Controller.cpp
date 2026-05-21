@@ -277,6 +277,7 @@ void Controller::setupWifi() {
 }
 
 void Controller::loop() {
+    clientController.dispatchPendingEvents();
     pluginManager->loop();
 
     if (screenReady) {
