@@ -8,6 +8,7 @@
 #include <display/core/process/BrewProcess.h>
 #include <display/core/utils.h>
 #include <display/models/shot_log_format.h>
+#include <version.h>
 
 namespace {
 constexpr float TEMP_SCALE = 10.0f;
@@ -76,6 +77,12 @@ void ShotHistoryPlugin::setup(Controller *c, PluginManager *pm) {
         fs = &SD_MMC;
         ESP_LOGI("ShotHistoryPlugin", "Logging shot history to SD card");
     }
+    pm->on("controller:brew:prestart", [this](Event const &) {
+        // Snapshot the boiler's idle heater output before the brew sequence engages
+        // the pump (200 ms before brew:start fires). This pins down the integrator
+        // state for offline PID replay; see ShotLogControllerConfig::idleHeaterOutput.
+        idleHeaterOutputSnapshot = controller->getCurrentHeaterOutput();
+    });
     pm->on("controller:brew:start", [this](Event const &) { startRecording(); });
     pm->on("controller:brew:end", [this](Event const &) { endRecording(); });
     pm->on("controller:brew:clear", [this](Event const &) { endExtendedRecording(); });
@@ -116,6 +123,31 @@ void ShotHistoryPlugin::record() {
                 strncpy(header.profileName, profile.label.c_str(), sizeof(header.profileName) - 1);
                 header.profileName[sizeof(header.profileName) - 1] = '\0';
                 header.phaseTransitionCount = 0; // Initialize phase transition count
+
+                // v6+ controller-context block. PID gains and pump coefficients come
+                // from the Display-side authoritative copy in Settings (which the
+                // Display sets and forwards to the Controller via BLE). Pump coeffs
+                // are zero on Controllers without the dimming capability — those
+                // builds use SimplePump and don't have a flow model.
+                const auto &settings = controller->getSettings();
+                const PidGains pidGains = settings.getPidGains();
+                header.controllerConfig.heaterKp = pidGains.kp;
+                header.controllerConfig.heaterKi = pidGains.ki;
+                header.controllerConfig.heaterKd = pidGains.kd;
+                header.controllerConfig.heaterKff = pidGains.kff;
+                if (controller->getSystemInfo().capabilities.dimming) {
+                    const PumpFlowCoeffs coeffs = settings.getPumpFlowCoeffs();
+                    header.controllerConfig.pumpCoeffA = coeffs.a;
+                    header.controllerConfig.pumpCoeffB = coeffs.b;
+                    header.controllerConfig.pumpCoeffC = coeffs.c;
+                    header.controllerConfig.pumpCoeffD = coeffs.d;
+                }
+                header.controllerConfig.idleHeaterOutput = idleHeaterOutputSnapshot;
+
+                header.firmwareVersion.major = BUILD_VERSION_MAJOR;
+                header.firmwareVersion.minor = BUILD_VERSION_MINOR;
+                header.firmwareVersion.patch = BUILD_VERSION_PATCH;
+                header.firmwareVersion.commitsAhead = BUILD_VERSION_COMMITS_AHEAD;
                 // Write header placeholder
                 currentFile.write(reinterpret_cast<const uint8_t *>(&header), sizeof(header));
             }
@@ -140,6 +172,12 @@ void ShotHistoryPlugin::record() {
         sample.ev = encodeUnsigned(currentEstimatedWeight, WEIGHT_SCALE, WEIGHT_MAX_VALUE);
         sample.pr = encodeUnsigned(currentPuckResistance, RESISTANCE_SCALE, RESISTANCE_MAX_VALUE);
         sample.si = getSystemInfo(); // Pack system state information
+        // v6+: heater output (firmware-native 0..1000 → stored ×10, range 0..10000)
+        // and pump output (firmware-native 0..100 → stored ×100, range 0..10000).
+        // Decoder rule for both: percent = stored / 100.0. Cached values are 0
+        // when the Controller doesn't advertise the `extendedSensor` capability.
+        sample.ho = encodeUnsigned(controller->getCurrentHeaterOutput(), 10.0f, 10000);
+        sample.po = encodeUnsigned(controller->getCurrentPumpOutput(), 100.0f, 10000);
 
         // Track phase transitions
         if (controller->getMode() == MODE_BREW) {

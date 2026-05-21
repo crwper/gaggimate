@@ -84,6 +84,13 @@ class ShotHistoryPlugin : public Plugin {
     // Phase transition tracking (v5+)
     uint8_t lastRecordedPhase = 0xFF; // Invalid initial value to detect first phase
 
+    // Pre-shot idle heater output, captured on `controller:brew:prestart`
+    // (which fires unconditionally for brew mode). Read at startRecording time
+    // when populating header.controllerConfig.idleHeaterOutput. Snapshotting
+    // at prestart gives a clean steady-state reading from before the pump
+    // engages and the boiler PID begins reacting to the disturbance.
+    float idleHeaterOutputSnapshot = 0.0f;
+
     // Async rebuild state
     bool rebuildInProgress = false;
 

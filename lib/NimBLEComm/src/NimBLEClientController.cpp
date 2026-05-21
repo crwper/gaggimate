@@ -300,23 +300,30 @@ void NimBLEClientController::notifyCallback(NimBLERemoteCharacteristic *pRemoteC
         }
     }
     if (pRemoteCharacteristic->getUUID().equals(NimBLEUUID(SENSOR_DATA_UUID))) {
+        // v6 Controller firmware appends two extra fields (heaterOutput, pumpOutput).
+        // Older firmware emits five; sscanf returns however many parsed, leaving the
+        // rest at their initial 0.
         float temperature = 0.0f;
         float pressure = 0.0f;
         float puckFlow = 0.0f;
         float pumpFlow = 0.0f;
         float puckResistance = 0.0f;
+        float heaterOutput = 0.0f;
+        float pumpOutput = 0.0f;
 
-        int parsed = sscanf(rawData, "%f,%f,%f,%f,%f", &temperature, &pressure, &puckFlow, &pumpFlow, &puckResistance);
+        int parsed = sscanf(rawData, "%f,%f,%f,%f,%f,%f,%f", &temperature, &pressure, &puckFlow, &pumpFlow, &puckResistance,
+                            &heaterOutput, &pumpOutput);
         if (parsed < 5) {
             ESP_LOGW(LOG_TAG, "Malformed sensor data payload: %s", rawData);
             return;
         }
 
         ESP_LOGV(LOG_TAG,
-                 "Received sensor data: temperature=%.1f, pressure=%.1f, puck_flow=%.1f, pump_flow=%.1f, puck_resistance=%.1f",
-                 temperature, pressure, puckFlow, pumpFlow, puckResistance);
+                 "Received sensor data: temperature=%.1f, pressure=%.1f, puck_flow=%.1f, pump_flow=%.1f, "
+                 "puck_resistance=%.1f, heater_output=%.1f, pump_output=%.1f",
+                 temperature, pressure, puckFlow, pumpFlow, puckResistance, heaterOutput, pumpOutput);
         if (sensorCallback != nullptr) {
-            sensorCallback(temperature, pressure, puckFlow, pumpFlow, puckResistance);
+            sensorCallback(temperature, pressure, puckFlow, pumpFlow, puckResistance, heaterOutput, pumpOutput);
         }
     }
     if (pRemoteCharacteristic->getUUID().equals(NimBLEUUID(AUTOTUNE_RESULT_UUID))) {

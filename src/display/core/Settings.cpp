@@ -1,6 +1,7 @@
 #include "Settings.h"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 Settings::Settings() {
@@ -549,6 +550,78 @@ void Settings::doSave() {
     preferences.putString("btnb", implode(buttonBehavior, ","));
 
     preferences.end();
+}
+
+namespace {
+// Parse a fixed count of comma-separated floats from `s`. Returns true iff
+// exactly `count` non-empty tokens parsed cleanly via strtof (no trailing
+// garbage in any token). Caller passes a pre-zeroed output buffer; on
+// failure we leave it untouched so callers can rely on all-zeros.
+bool parseFloatCsv(const String &s, float *out, size_t count) {
+    if (s.length() == 0)
+        return false;
+    size_t produced = 0;
+    int start = 0;
+    while (produced < count) {
+        int end = s.indexOf(',', start);
+        const int tokenEnd = (end < 0) ? s.length() : end;
+        if (tokenEnd <= start)
+            return false; // empty token between commas, or trailing comma
+        const String token = s.substring(start, tokenEnd);
+        char *parseEnd = nullptr;
+        const float value = strtof(token.c_str(), &parseEnd);
+        if (parseEnd == nullptr || *parseEnd != '\0')
+            return false; // trailing non-numeric content
+        out[produced++] = value;
+        if (end < 0) {
+            // No more separators; need produced == count and no leftovers.
+            return produced == count;
+        }
+        start = end + 1;
+    }
+    // Reject extra trailing data (e.g. five fields when four expected).
+    return start > static_cast<int>(s.length());
+}
+} // namespace
+
+PidGains Settings::getPidGains() const {
+    PidGains result{};
+    float values[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    if (parseFloatCsv(pid, values, 4)) {
+        result.kp = values[0];
+        result.ki = values[1];
+        result.kd = values[2];
+        result.kff = values[3];
+    }
+    return result;
+}
+
+PumpFlowCoeffs Settings::getPumpFlowCoeffs() const {
+    // The pumpModelCoeffs string accepts two distinct forms, mirroring the BLE
+    // wire convention in NimBLEServerController:
+    //   - "a,b"        → simple model (oneBarFlow, nineBarFlow); c/d unused
+    //   - "a,b,c,d"    → polynomial model (a, b, c, d are coefficients)
+    // Try the 4-field form first; if that fails, fall back to 2-field with
+    // NaN sentinels for c/d so analysis tools can distinguish "simple model"
+    // (a, b set + c, d = NaN) from "polynomial model" (all four set) and
+    // from "malformed" (all zeros).
+    PumpFlowCoeffs result{};
+    float values[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    if (parseFloatCsv(pumpModelCoeffs, values, 4)) {
+        result.a = values[0];
+        result.b = values[1];
+        result.c = values[2];
+        result.d = values[3];
+    } else {
+        float pair[2] = {0.0f, 0.0f};
+        if (parseFloatCsv(pumpModelCoeffs, pair, 2)) {
+            result.a = pair[0];
+            result.b = pair[1];
+            result.c = NAN;
+            result.d = NAN;
+        }
+    }
+    return result;
 }
 
 [[noreturn]] void Settings::loopTask(void *arg) {

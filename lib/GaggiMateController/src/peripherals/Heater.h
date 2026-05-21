@@ -24,6 +24,10 @@ class Heater {
 
     void setSetpoint(float setpoint);
     float getSetpoint() { return setpoint; };
+    // Current PID output (0..1000 as a float). Used by GaggiMateController
+    // when pushing extended sensor data to the Display, which uses it for
+    // `.slog` v6+ recording.
+    float getOutput() const { return output; }
     void setTunings(float Kp, float Ki, float Kd);
     void autotune(int goal, int windowSize);
 
